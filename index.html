@@ -238,6 +238,15 @@
   <!-- EXPORT -->
   <div>
     <div class="section-title">Vie tiedosto</div>
+    <div class="control-row" style="margin-bottom:8px">
+      <span class="control-label">Resoluutio</span>
+      <select id="exportScale" style="flex:1;background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:11px">
+        <option value="1">1× – 1450×964 px</option>
+        <option value="2" selected>2× – 2900×1928 px</option>
+        <option value="3">3× – 4350×2892 px</option>
+      </select>
+    </div>
+    <div class="logo-info" style="margin-bottom:8px" id="exportDpiHint">2× ≈ 600 DPI @ 6cm tulostus</div>
     <div class="btn-group">
       <button class="btn btn-primary" onclick="exportPNG()">⬇ Lataa PNG (läpinäkyvä)</button>
       <button class="btn btn-secondary" onclick="exportPDF()">⬇ Lataa PDF</button>
@@ -588,6 +597,14 @@ document.getElementById('bgInput').addEventListener('change', e => {
 document.getElementById('bgFit').addEventListener('change', e => { state.bgFit = e.target.value; draw(); });
 document.getElementById('bgColor').addEventListener('input', e => { state.bgColor = e.target.value; draw(); });
 
+document.getElementById('exportScale').addEventListener('change', e => {
+  const scale = parseFloat(e.target.value);
+  const w = Math.round(1450 * scale), h = Math.round(964 * scale);
+  // DPI @ 6.1cm leveys (tyypillinen läppäri): 1450px / 6.1cm * 2.54 = ~604 DPI
+  const dpi = Math.round(1450 * scale / 6.1 * 2.54);
+  document.getElementById('exportDpiHint').textContent = scale + '× – ' + w + '×' + h + ' px ≈ ' + dpi + ' DPI @ 6cm';
+});
+
 // RAAHAUS kanvaksella (vapaa sijoittelu)
 function getLogoRect(logo) {
   if (!logo.img) return null;
@@ -642,58 +659,52 @@ canvas.addEventListener('mouseleave', () => { activeLogo = -1; });
 // Leikkuuviivakuva on upotettu suoraan - ei erillistä latausta
 
 // EXPORT – PNG läpinäkyvällä taustalla (maski käytössä)
-function exportPNG() {
-  if (!state.maskImg) {
-    // Ei maskia: tallenna sellaisenaan
-    const link = document.createElement('a');
-    link.download = 'kansitarra.png';
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-    return;
-  }
+function getExportScale() {
+  return parseFloat(document.getElementById('exportScale').value) || 2;
+}
 
-  // Luo erillinen export-canvas ilman leikkausviivoja
-  const expCanvas = document.createElement('canvas');
-  expCanvas.width = W;
-  expCanvas.height = H;
-  const expCtx = expCanvas.getContext('2d');
-  expCtx.scale(1, 1);
-
-  // Piirrä sisältö (ilman maskiviivojen skaalaus-komplikaatioita, käytä suoraa piirtoa)
-  expCtx.clearRect(0, 0, W, H);
-  expCtx.fillStyle = state.bgColor;
-  expCtx.fillRect(0, 0, W, H);
+function drawToCanvas(targetCtx, scale) {
+  const EW = W * scale, EH = H * scale;
+  targetCtx.clearRect(0, 0, EW, EH);
+  targetCtx.fillStyle = state.bgColor;
+  targetCtx.fillRect(0, 0, EW, EH);
 
   if (state.bgImage) {
     const img = state.bgImage;
     if (state.bgFit === 'cover') {
-      const s = Math.max(W / img.width, H / img.height);
-      expCtx.drawImage(img, (W - img.width*s)/2, (H - img.height*s)/2, img.width*s, img.height*s);
+      const s = Math.max(EW / img.width, EH / img.height);
+      targetCtx.drawImage(img, (EW - img.width*s)/2, (EH - img.height*s)/2, img.width*s, img.height*s);
     } else if (state.bgFit === 'contain') {
-      const s = Math.min(W / img.width, H / img.height);
-      expCtx.drawImage(img, (W - img.width*s)/2, (H - img.height*s)/2, img.width*s, img.height*s);
+      const s = Math.min(EW / img.width, EH / img.height);
+      targetCtx.drawImage(img, (EW - img.width*s)/2, (EH - img.height*s)/2, img.width*s, img.height*s);
     } else if (state.bgFit === 'fill') {
-      expCtx.drawImage(img, 0, 0, W, H);
+      targetCtx.drawImage(img, 0, 0, EW, EH);
     } else {
-      expCtx.drawImage(img, (W - img.width)/2, (H - img.height)/2);
+      targetCtx.drawImage(img, (EW - img.width)/2, (EH - img.height)/2);
     }
   }
 
   state.logos.forEach(logo => {
     if (!logo.img || !logo.placed) return;
-    const lw = W * logo.sizePercent / 100;
+    const lw = EW * logo.sizePercent / 100;
     const lh = lw * logo.img.height / logo.img.width;
-    expCtx.save();
-    expCtx.globalAlpha = logo.opacity / 100;
-    expCtx.drawImage(logo.img, logo.x, logo.y, lw, lh);
-    expCtx.restore();
+    targetCtx.save();
+    targetCtx.globalAlpha = logo.opacity / 100;
+    targetCtx.drawImage(logo.img, logo.x * scale, logo.y * scale, lw, lh);
+    targetCtx.restore();
   });
+}
 
-  // Exportissa overlay ei näy - vain taustakuva + logot
-  // (Leikkaus tehdään tarvittaessa erikseen)
+function exportPNG() {
+  const scale = getExportScale();
+  const expCanvas = document.createElement('canvas');
+  expCanvas.width = W * scale;
+  expCanvas.height = H * scale;
+  const expCtx = expCanvas.getContext('2d');
+  drawToCanvas(expCtx, scale);
 
   const link = document.createElement('a');
-  link.download = 'kansitarra.png';
+  link.download = 'kansitarra-' + scale + 'x.png';
   link.href = expCanvas.toDataURL('image/png');
   link.click();
 }
@@ -709,12 +720,26 @@ function exportPDF() {
 
 function doExportPDF() {
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  const pw = 297, ph = 210;
-  const ratio = Math.min(pw/W, ph/H);
-  const iw = W*ratio, ih = H*ratio;
-  doc.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', (pw-iw)/2, (ph-ih)/2, iw, ih);
-  doc.save('kansitarra.pdf');
+  const scale = getExportScale();
+  const expCanvas = document.createElement('canvas');
+  expCanvas.width = W * scale;
+  expCanvas.height = H * scale;
+  const expCtx = expCanvas.getContext('2d');
+  drawToCanvas(expCtx, scale);
+
+  // PDF sivun koko täsmälleen canvaksen kuvasuhteessa, 300 DPI @ 6.1 cm leveys
+  const DPI = 300;
+  const CM_PER_INCH = 2.54;
+  const widthMm = (W * scale / DPI) * CM_PER_INCH * 10;
+  const heightMm = (H * scale / DPI) * CM_PER_INCH * 10;
+
+  const orientation = widthMm > heightMm ? 'landscape' : 'portrait';
+  const doc = new jsPDF({ orientation, unit: 'mm', format: [widthMm, heightMm] });
+
+  // PNG-pakkaus — häviötön, painolaatuinen
+  const imgData = expCanvas.toDataURL('image/png');
+  doc.addImage(imgData, 'PNG', 0, 0, widthMm, heightMm);
+  doc.save('kansitarra-' + scale + 'x.pdf');
 }
 </script>
 </body>
